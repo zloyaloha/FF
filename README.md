@@ -4,7 +4,7 @@
 
 ```
 let program {
-    print "Hello, world!"
+    print "Hello, world!";
 }
 ```
 
@@ -78,3 +78,129 @@ let rec fac n =
    if n < 2 then 1
    else n * fac(n - 1)
 ```
+
+## Синтаксис
+Сначала мы, как я уже упомянул, хотели взять синтаксис LISP'а, но по итогу передумали Мы взяли синтаксис F# и доработали его под наши нужды. Получился некий сплав C++ и F#.
+
+***Ниже вы можете увидеть примеры базовых конструкций языка.***
+
+Функции
+```
+let func_name param1 param2 {
+    func1 param1;
+    func2 param1 param2;
+}
+```
+Именнованные переменные
+```
+let var_name {val}
+```
+Лямбда-выражения
+```
+let lambda_example num {lambda a : + a 1}
+```
+Обратите внимание, что арифметика работает в **постфиксной нотации**.
+```
+let varname { + 1 2}
+```
+## Парсер и лексер
+То, что раньше, как мне казалось, называлось парсер, оказывается называется лексер. При этом лексер, в нашей реалиации реализован при помощи библиотеки fparsec, что вносит некий диссонанс. Но в общем не важно, посмотрим на реализацию некоторых лексеров.
+
+**Лексер имен переменных**
+```fsharp
+let val_name_parser = 
+    spaces >>. many1Chars (letter <|> digit <|> pchar '_') .>> spaces
+```
+**Лексер вызовов функций**
+```
+let exec_parser = 
+    pipe2 (val_name_parser) (sepEndBy val_name_parser spaces .>> skipChar ';') (fun x y -> ExecData(x, y))
+```
+**Лексер let-конструкций**
+```fsharp
+let body_parser, body_parser_ref = createParserForwardedToRef ()
+
+let let_parser = 
+    pipe3 (skipString "let" >>. val_name_parser) params_parser body_parser (fun x y z -> LetData(x, y, [z]))
+
+do body_parser_ref.Value <- skipChar '{' >>. ((attempt exec_parser) <|> (let_parser)) .>> skipChar '}'
+```
+На его примере мы можем увидеть ~~парсинг~~ лексинг сложных рекурсивных выражений. Внутри let_parser'а вызывается лексер тела выражения, в котором может начать токенизироваться либо функция, либо снова let-выражения. 
+
+Первый let - объявление того, что лексеры будут рекурсивными.
+
+Так выглядить преобразователь из списка токенов в нормальные человеческие выражения
+
+```fsharp
+let rec _convert_to_expr list (data: list<ParsedData>) = 
+    let rec _params_expr list expr = 
+        if List.isEmpty list then
+            List.head expr
+        else
+            let result = Lam(List.head list, expr)
+            _params_expr (List.tail list) [result]
+
+    let params_expr list body = 
+        _params_expr list body
+
+    let add_app source expr = 
+        App(source, expr)
+
+    let rec _exec_expr list acc =
+        if List.isEmpty list then
+            acc
+        else
+            let head = List.head list
+            match Int32.TryParse (head: string) with
+            | true, num -> 
+                let new_acc = add_app acc (Int(num))
+                _exec_expr (List.tail list) new_acc
+            | _ -> 
+                let new_acc = add_app acc (Var(head))
+                _exec_expr (List.tail list) new_acc
+
+    let exec_expr name body =
+        App(Var(name), _exec_expr body (Void()))
+    
+    let let_expr name param body =
+        let expr = _convert_to_expr [] body
+        Let(name, params_expr param expr)
+
+    if List.isEmpty data then
+        list
+    else
+        match List.head data with
+        | LetData(name, param, body) -> _convert_to_expr (list @ [let_expr name param body]) (List.tail data)
+        | ExecData(name, body) -> _convert_to_expr (list @ [exec_expr name body]) (List.tail data)
+```
+
+Реализации остальных парсеров можно посмотреть [здесь](https://github.com/MAILabs-Edu-2024/fp-compiler-lab-hockey-s-head/blob/main/Program.fs)
+
+## Интерпретатор
+Для начала определим типы выражений, которые у нас могут быть, а также глобальное окружение. 
+```fsharp
+type id = string
+type expr =
+| App of expr*expr
+| Lam of id*list<expr>
+| Var of id
+| Int of int
+| PFunc of id
+| Cond of expr*expr*expr
+| Let of id*expr
+| LetRec of id*expr
+| Op of id*int*expr list
+| Closure of expr*env
+| RClosure of expr*env*id
+| Void of unit
+and
+  env = Map<id,expr>
+```
+продолжение следует...
+## Примеры кода
+
+
+## Вывод
+За эти две недели выполнения лабораторной работы мы прошли огонь, воду и медные трубы. Мы познали, насколько интересно и одновременно сложно писать свой язык программирования. Мы поняли, как работают парсеры и лексеры, как написать свой интерпретатор, какие сложности и подводные камни существуют и как можно наш язык улучшить. Может быть мы еще вернемся к разработке нашего детища...
+
+В тоже время, мы осознали насколько мощный инструмент F#. С его помощью можно более красиво и элегантно написать то, что в традиционном языке программирования заняло не одну сотню строк. Мы глубже познакомились с устройством работы языка F# и с нюансами функционального программирования. Надеемся, что эти знания пригодятся нам в профессиональной деятельности.
